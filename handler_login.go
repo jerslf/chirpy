@@ -6,14 +6,20 @@ import (
 	"time"
 
 	"github.com/jerslf/chirpy/internal/auth"
+	"github.com/jerslf/chirpy/internal/database"
 )
 
 func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 	// Parse JSON request
 	type parameters struct {
-		Email            string `json:"email"`
-		Password         string `json:"password"`
-		ExpiresInSeconds int    `json:"expires_in_seconds"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	type response struct {
+		User
+		Token        string `json:"token"`
+		RefreshToken string `json:"refresh_token"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -24,6 +30,7 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get user
 	dbUser, err := cfg.db.GetUserByEmail(r.Context(), params.Email)
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, "Incorrect email or password", err)
@@ -37,18 +44,31 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Determine expiration time
-	expiration := time.Hour
-	if params.ExpiresInSeconds > 0 {
-		if params.ExpiresInSeconds < 3600 {
-			expiration = time.Duration(params.ExpiresInSeconds) * time.Second
-		}
-	}
-
-	// Create JWT
-	token, err := auth.MakeJWT(dbUser.ID, cfg.jwtSecret, expiration)
+	// Create access token JWT (expires in 1 hour)
+	token, err := auth.MakeJWT(dbUser.ID, cfg.jwtSecret, time.Hour)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't create JWT", err)
+		return
+	}
+
+	// Create refresh token (random string)
+	refreshToken, err := auth.MakeRefreshToken()
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create refresh token", err)
+		return
+	}
+
+	// Store refresh token in DB (expires in 60 days)
+	expiresAt := time.Now().UTC().Add(60 * 24 * time.Hour)
+	_, err = cfg.db.CreateRefreshToken(r.Context(), database.CreateRefreshTokenParams{
+		Token:     refreshToken,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+		UserID:    dbUser.ID,
+		ExpiresAt: expiresAt,
+	})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't store refresh token", err)
 		return
 	}
 
@@ -57,9 +77,14 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: dbUser.CreatedAt,
 		UpdatedAt: dbUser.UpdatedAt,
 		Email:     dbUser.Email,
-		Token:     token,
+	}
+
+	resp := response{
+		User:         user,
+		Token:        token,
+		RefreshToken: refreshToken,
 	}
 
 	// Respond with 200 OK
-	respondWithJSON(w, http.StatusOK, user)
+	respondWithJSON(w, http.StatusOK, resp)
 }
