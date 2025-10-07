@@ -10,10 +10,6 @@ import (
 )
 
 func (cfg *apiConfig) handlerRevoke(w http.ResponseWriter, r *http.Request) {
-	type Response struct {
-		Token string `json:"token"`
-	}
-
 	// Extract the token from the Authorization header
 	token, err := auth.GetBearerToken(r.Header)
 	if err != nil {
