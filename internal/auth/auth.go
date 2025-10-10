@@ -97,3 +97,24 @@ func MakeRefreshToken() (string, error) {
 	}
 	return hex.EncodeToString(bytes), nil
 }
+
+func GetAPIKey(headers http.Header) (string, error) {
+	authHeader := headers.Get("Authorization")
+	if authHeader == "" {
+		return "", fmt.Errorf("no Authorization header")
+	}
+
+	// Expected format: "ApiKey POLKA_KEY"
+	const prefix = "ApiKey"
+	if !strings.HasPrefix(authHeader, prefix) {
+		return "", fmt.Errorf("invalid Authorization header format")
+	}
+
+	// Remove "ApiKey " and trim spaces
+	key := strings.TrimSpace(authHeader[len(prefix):])
+	if key == "" {
+		return "", fmt.Errorf("key missing after ApiKey")
+	}
+
+	return key, nil
+}
